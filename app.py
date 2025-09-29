@@ -1,4 +1,4 @@
-     
+# app.py
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -143,9 +143,11 @@ def index():
 # ----- Device & dashboard APIs -----
 @app.route('/update_data', methods=['POST'])
 def update_data():
+    # endpoint used by ESP32 to POST sensor readings
     data = request.get_json(force=True, silent=True)
     if not data:
         return jsonify({"error":"invalid json"}), 400
+
     sample = {
         "ts": int(time.time()*1000),
         "emg": float(data.get("emg",0) or 0),
@@ -156,12 +158,16 @@ def update_data():
         "gyro_y": float(data.get("gyro_y",0) or 0),
         "gyro_z": float(data.get("gyro_z",0) or 0)
     }
+
     with lock:
         sensor_history.append(sample)
-        sd = SensorData(ts=sample['ts'], emg=sample['emg'], accel_x=sample['accel_x'], accel_y=sample['accel_y'],
-                        accel_z=sample['accel_z'], gyro_x=sample['gyro_x'], gyro_y=sample['gyro_y'], gyro_z=sample['gyro_z'])
+        sd = SensorData(ts=sample['ts'], emg=sample['emg'],
+                        accel_x=sample['accel_x'], accel_y=sample['accel_y'],
+                        accel_z=sample['accel_z'],
+                        gyro_x=sample['gyro_x'], gyro_y=sample['gyro_y'], gyro_z=sample['gyro_z'])
         db.session.add(sd)
         db.session.commit()
+
     alerts = []
     if sample['emg'] > THRESHOLDS['emg']:
         alerts.append("High EMG")
@@ -169,6 +175,7 @@ def update_data():
         alerts.append("High Accel X")
     if abs(sample['gyro_y']) > THRESHOLDS['gyro']:
         alerts.append("High Gyro Y")
+
     return jsonify({"status":"ok","alerts":alerts})
 
 @app.route('/get_data', methods=['GET'])
@@ -181,14 +188,17 @@ def get_data():
         cmds = {"motor1":cs.motor1,"motor2":cs.motor2,"motor3":cs.motor3,"motor4":cs.motor4,"motor5":cs.motor5,"motor6":cs.motor6} if cs else {f"motor{i}":0 for i in range(1,7)}
         notes_q = TherapistNote.query.order_by(TherapistNote.ts.desc()).limit(10).all()
         notes_out = [{"ts":n.ts,"author":n.author,"note":n.note} for n in notes_q]
+
     alerts=[]
     if latest.get("emg",0) > THRESHOLDS['emg']: alerts.append("High EMG")
     if abs(latest.get("accel_x",0)) > THRESHOLDS['accel']: alerts.append("High Accel X")
     if abs(latest.get("gyro_y",0)) > THRESHOLDS['gyro']: alerts.append("High Gyro Y")
+
     return jsonify({"history":history,"latest":latest,"commands":cmds,"notes":notes_out,"alerts":alerts})
 
 @app.route('/get_command', methods=['GET'])
 def get_command():
+    # public endpoint for ESP32 to poll motor positions
     cs = CommandState.query.first()
     if not cs:
         return jsonify({f"motor{i}":0 for i in range(1,7)})
@@ -197,6 +207,7 @@ def get_command():
 @app.route('/set_command', methods=['POST'])
 @login_required
 def set_command():
+    # webapp (therapist) changes motor positions
     if session.get('role') != 'therapist':
         return jsonify({"error":"forbidden"}), 403
     data = request.get_json(force=True, silent=True)
@@ -253,6 +264,15 @@ def get_notes():
     return jsonify([{"ts":n.ts,"author":n.author,"note":n.note} for n in notes])
 
 # ----- Templates -----
+# (Unchanged visually from your previous version; defensive Jinja usage applied.)
+# LOGIN_HTML, REGISTER_HTML and INDEX_HTML strings follow (kept the same as previously corrected).
+# For brevity here they are included exactly as before — copy/paste your existing templates or
+# use the ones from your current file. They must include the defensive expressions:
+#    (commands|default({})).get('motor' ~ i, 0)
+# and
+#    {{ username|default('User') }} and {{ role|default('patient') }}
+#
+# --- LOGIN_HTML ---
 LOGIN_HTML = r"""
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Login</title>
@@ -279,6 +299,7 @@ LOGIN_HTML = r"""
 </div></div></div></body></html>
 """
 
+# --- REGISTER_HTML ---
 REGISTER_HTML = r"""
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Register</title>
@@ -314,7 +335,8 @@ REGISTER_HTML = r"""
 </div></div></div></body></html>
 """
 
-# Defensive INDEX_HTML: uses commands | default({}) so Jinja won't raise if missing
+# --- INDEX_HTML ---
+# (The same corrected index template you used earlier; it must include defensive lookups.)
 INDEX_HTML = r"""
 <!doctype html>
 <html>
@@ -538,4 +560,5 @@ with app.app_context():
     ensure_command_row()
 
 if __name__ == "__main__":
+    # debug=True is convenient for development; turn off in production
     app.run(host="0.0.0.0", port=APP_PORT, debug=True)
